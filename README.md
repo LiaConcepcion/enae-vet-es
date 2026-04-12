@@ -4,6 +4,50 @@ Veterinary clinic chatbot and booking assistant (ENAE case study). This document
 
 ---
 
+## Proyecto y Gestión
+
+- **Tablero Jira:** [https://liacconcepcion-1776021076256.atlassian.net/jira/software/projects/SCRUM/boards/1](https://liacconcepcion-1776021076256.atlassian.net/jira/software/projects/SCRUM/boards/1)
+- **Repositorio GitHub:** [https://github.com/LiaConcepcion/enae-vet-es](https://github.com/LiaConcepcion/enae-vet-es)
+- **Alumna:** Lia Concepcion
+- **Curso:** Data Science e IA para la Toma de Decisiones — ENAE Business School
+
+---
+
+## Cómo ejecutar
+
+Demos locales en **Flask** (`chatbot_v0.py` y `chatbot_v1.py`). Ambas usan el puerto **5000**; ejecuta **solo una** a la vez. Necesitas una clave **OpenAI** en `.env` (copia `.env.example` a `.env` y define `OPENAI_API_KEY`).
+
+### Entorno (una vez)
+
+```bash
+cd /ruta/a/enae-vet-es
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env               # si aún no existe
+# Edita .env y pega tu OPENAI_API_KEY
+```
+
+### Chatbot v0
+
+```bash
+source .venv/bin/activate
+python chatbot_v0.py
+```
+
+Abre en el navegador **http://127.0.0.1:5000/**. Detén el servidor con `Ctrl+C` en la terminal.
+
+### Chatbot v1
+
+```bash
+source .venv/bin/activate
+python chatbot_v1.py
+```
+
+Abre **http://127.0.0.1:5000/**. La interfaz envía `session_id` para la memoria de conversación. Detén con `Ctrl+C`.
+
+---
+
 ## Technologies
 
 The project uses (or is designed to use) the following technologies. Their roles are summarised here; see `.cursor/skills/langchain-vet-chatbots/SKILL.md` and `.cursor/agents/backend-langchain-vet.md` for implementation guidance.
@@ -17,6 +61,19 @@ The project uses (or is designed to use) the following technologies. Their roles
 | **Frontend / channel** | User-facing channel for the bot (e.g. web chat, WhatsApp); exact choice depends on implementation. |
 
 The bot does not diagnose or prescribe; it supports scheduling, FAQs, and internal procedures, and cites tools or retrieved documents when giving procedural information.
+
+---
+
+## Local demos: Chatbot v0 and v1 (Flask)
+
+Two standalone scripts run a small **Flask** app on **http://127.0.0.1:5000** (run **one at a time**; both bind to the same port). Configure **`OPENAI_API_KEY`** in `.env` (see `.env.example`).
+
+| Script | What it does |
+|--------|----------------|
+| **`chatbot_v0.py`** | Minimal LangChain pipeline: **no system prompt**, **no memory**. Each message is independent. `POST /ask_bot` accepts form field **`msg`** only. |
+| **`chatbot_v1.py`** | **Spanish system prompt** with clinic rules for **sterilisation/castration only** (drop-off/pick-up windows by species, 240-minute daily surgery quota, heat postponement, fasting, pre-op blood work over 6 years, multi-pet and out-of-scope redirection). Uses **`RunnableWithMessageHistory`** so the model **remembers the thread** (species, pet name, etc.). `POST /ask_bot` expects **`msg`** and **`session_id`**; the UI stores `session_id` in `localStorage`. |
+
+Para instalar dependencias y arrancar cada script, sigue la sección **[Cómo ejecutar](#cómo-ejecutar)**.
 
 ---
 
