@@ -4,6 +4,11 @@ pydantic>=2.0,<3
 
 # Course chatbot v0–v3 (LangChain + Flask UI); see chatbot_v0.py
 flask>=3.0.0,<4
+langchain>=0.3.0,<0.4
+langchain-community>=0.3.0,<0.4
 langchain-core>=0.3.0,<1
 langchain-openai>=0.2.0,<1
+langchain-text-splitters>=0.3.0,<0.4
+faiss-cpu>=1.8.0,<2
+beautifulsoup4>=4.12.0,<5
 python-dotenv>=1.0.0,<2

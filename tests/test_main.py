@@ -1,4 +1,4 @@
-"""Tests for main.py (VETES-16): Chatbot v4 placeholder API."""
+"""Tests for main.py: FastAPI clinic chatbot with LangChain memory."""
 
 from __future__ import annotations
 
@@ -13,13 +13,22 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def clear_openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministic tests without calling OpenAI."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    import main as main_module
+
+    main_module._chain_with_history = None
+
+
 def test_get_home_returns_html(client: TestClient) -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"].lower()
     html_body = resp.text
     assert html_body.strip()
-    assert "chatbot" in html_body.lower()
+    assert "clínica" in html_body.lower() or "esterilización" in html_body.lower()
 
 
 def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:
@@ -30,9 +39,9 @@ def test_post_ask_bot_urlencoded_ok(client: TestClient) -> None:
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["msg"] == "hello"
     assert data["session_id"] == "s1"
-    assert data["placeholder"] is True
+    assert "msg" in data
+    assert "OPENAI_API_KEY" in data["msg"]
 
 
 def test_post_ask_bot_missing_msg(client: TestClient) -> None:

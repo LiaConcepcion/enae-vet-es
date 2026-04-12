@@ -1,27 +1,147 @@
-"""Chatbot v4 placeholder API (VETES-16): GET / (HTML) and POST /ask_bot (urlencoded)."""
+"""FastAPI clinic chatbot (v1 parity): Spanish UI, system prompt, conversation memory, POST /ask_bot.
+
+Reads ``OPENAI_API_KEY`` from the environment (Vercel env or local ``.env`` via python-dotenv).
+"""
 
 from __future__ import annotations
 
-import json
+import asyncio
+import os
+import threading
 from typing import Any
 from urllib.parse import parse_qs
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
+load_dotenv()
+
+SYSTEM_PROMPT_ES = """Eres un asistente virtual de una clínica veterinaria. Cumple SIEMPRE estas reglas:
+
+- Alcance: solo gestionas información y citas relacionadas con ESTERILIZACIÓN / CASTRACIÓN. No ofreces otro tipo de consultas ni servicios en este canal.
+- Perros — entrega (drop-off): de 8:00 a 9:00; recogida (pick-up): de 16:00 a 18:00.
+- Gatos — entrega: de 8:00 a 9:00; recogida: después de las 17:00. Deben venir en transportín rígido (no cartón ni tela).
+- Capacidad quirúrgica diaria: como máximo 240 minutos de cirugía en total por día.
+- Si una perra está en celo, la cirugía debe posponerse 2 meses.
+- Ayuno preoperatorio: 8–12 horas sin comida; agua permitida hasta 1–2 horas antes de la cirugía.
+- Analítica preoperatoria (sangre) obligatoria en animales de más de 6 años.
+- Si el cliente tiene MÁS DE UN animal / varias mascotas, indícale que debe llamar por teléfono a la clínica (no gestiones varias mascotas aquí).
+- Urgencias o cualquier tema fuera de este alcance: deriva al personal de la clínica (teléfono o contacto humano); no inventes citas ni diagnósticos.
+- Recuerda y utiliza lo que el cliente te diga a lo largo del chat (especie, nombre del paciente, datos relevantes) para responder de forma coherente.
+
+No diagnostiques ni prescribas medicamentos. Sé claro, profesional y responde en español salvo que el cliente pida otro idioma."""
+
+CHAT_HTML_ES = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"><title>Asistente — Clínica veterinaria</title>
+  <style>
+    body{font-family:Helvetica;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#f5f7fa,#c3cfe2)}
+    .msger{display:flex;flex-direction:column;width:100%;max-width:600px;height:80vh;border:2px solid #ddd;border-radius:8px;background:#fff;box-shadow:0 8px 16px rgba(0,0,0,.1)}
+    .msger-header{padding:12px;text-align:center;border-bottom:2px solid #ddd;background:#eee;color:#333;font-weight:bold}
+    .msger-chat{flex:1;overflow-y:auto;padding:12px}
+    .msg{display:flex;align-items:flex-end;margin-bottom:10px}
+    .msg-bubble{max-width:75%;padding:10px 14px;border-radius:12px}
+    .left-msg .msg-bubble{background:#ececec;border-bottom-left-radius:2px}
+    .right-msg{flex-direction:row-reverse}
+    .right-msg .msg-bubble{background:#579ffb;color:#fff;border-bottom-right-radius:2px}
+    .msger-inputarea{display:flex;padding:10px;border-top:2px solid #ddd;background:#eee}
+    .msger-input{flex:1;padding:10px;border:none;border-radius:6px;margin-right:8px;font-size:1em}
+    .msger-send-btn{padding:10px 20px;border:none;border-radius:6px;background:rgb(0,196,65);color:#fff;font-weight:bold;cursor:pointer}
+  </style>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+  <section class="msger">
+    <header class="msger-header">Asistente — Esterilización / castración (memoria de conversación)</header>
+    <main class="msger-chat">
+      <div class="msg left-msg"><div class="msg-bubble">Hola. Soy el asistente de la clínica para esterilización/castración. ¿En qué puedo ayudarte?</div></div>
+    </main>
+    <form class="msger-inputarea">
+      <input type="text" class="msger-input" id="textInput" placeholder="Escribe tu mensaje...">
+      <button type="submit" class="msger-send-btn">Enviar</button>
+    </form>
+  </section>
+  <script>
+    (function() {
+      var k = "enae_chat_session_fastapi";
+      var sid = localStorage.getItem(k);
+      if (!sid) { sid = "sess_" + Math.random().toString(36).slice(2) + "_" + Date.now(); localStorage.setItem(k, sid); }
+      $(".msger-inputarea").on("submit", function(e) {
+        e.preventDefault();
+        var msgText = $("#textInput").val().trim();
+        if (!msgText) return;
+        $(".msger-chat").append('<div class="msg right-msg"><div class="msg-bubble">' + $("<div>").text(msgText).html() + '</div></div>');
+        $("#textInput").val("");
+        $.post("/ask_bot", { msg: msgText, session_id: sid }).done(function(data) {
+          $(".msger-chat").append('<div class="msg left-msg"><div class="msg-bubble">' + $("<div>").text(data.msg || data).html() + '</div></div>');
+        }).fail(function(xhr) {
+          var err = (xhr.responseJSON && xhr.responseJSON.detail) ? xhr.responseJSON.detail : xhr.statusText;
+          $(".msger-chat").append('<div class="msg left-msg"><div class="msg-bubble">Error: ' + err + '</div></div>');
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
+"""
+
 app = FastAPI(
-    title="Chatbot v4",
-    version="0.1.0",
-    description="Placeholder API for clinic chatbot: HTML home + form-based ask endpoint.",
+    title="Chatbot clínica",
+    version="1.0.0",
+    description="API FastAPI: chat en español con memoria (LangChain), compatible con Vercel.",
 )
+
+_session_lock = threading.Lock()
+_session_histories: dict[str, InMemoryChatMessageHistory] = {}
+_chain_with_history: RunnableWithMessageHistory | None = None
+
+
+def _get_session_history(session_id: str) -> InMemoryChatMessageHistory:
+    with _session_lock:
+        if session_id not in _session_histories:
+            _session_histories[session_id] = InMemoryChatMessageHistory()
+        return _session_histories[session_id]
+
+
+def _build_chain_with_history() -> RunnableWithMessageHistory | None:
+    if not os.environ.get("OPENAI_API_KEY"):
+        return None
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SYSTEM_PROMPT_ES),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+    base = prompt | llm
+    return RunnableWithMessageHistory(
+        base,
+        _get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+    )
+
+
+def _ensure_chain() -> RunnableWithMessageHistory | None:
+    global _chain_with_history
+    if _chain_with_history is None:
+        _chain_with_history = _build_chain_with_history()
+    return _chain_with_history
 
 
 class AskBotResponse(BaseModel):
-    """Stub response for POST /ask_bot until LangChain is added."""
+    """Bot reply and echo of ``session_id`` for the client."""
 
-    msg: str = Field(examples=["hello"])
+    msg: str = Field(examples=["Respuesta del asistente."])
     session_id: str = Field(examples=["s1"])
-    placeholder: bool = True
 
 
 @app.get(
@@ -31,14 +151,7 @@ class AskBotResponse(BaseModel):
     responses={200: {"content": {"text/html": {}}}},
 )
 async def home() -> Response:
-    html = (
-        "<!DOCTYPE html>"
-        "<html><head><title>Chatbot v4</title></head>"
-        "<body><h1>Chatbot v4 Placeholder</h1>"
-        "<p>This route is reserved for a future visual chat UI.</p>"
-        "</body></html>"
-    )
-    return Response(content=html, media_type="text/html")
+    return Response(content=CHAT_HTML_ES, media_type="text/html; charset=utf-8")
 
 
 def _parse_urlencoded_body(body_bytes: bytes) -> dict[str, str]:
@@ -54,14 +167,14 @@ def _validate_ask_bot_fields(msg: str | None, session_id: str | None) -> tuple[s
     if msg is None or session_id is None:
         raise HTTPException(
             status_code=422,
-            detail="msg and session_id are required fields",
+            detail="msg y session_id son obligatorios",
         )
     msg_clean = msg.strip()
     session_clean = session_id.strip()
     if not msg_clean or not session_clean:
         raise HTTPException(
             status_code=422,
-            detail="msg and session_id must be non-empty strings",
+            detail="msg y session_id deben ser cadenas no vacías",
         )
     return msg_clean, session_clean
 
@@ -76,14 +189,35 @@ async def ask_bot(request: Request) -> AskBotResponse:
     if "application/x-www-form-urlencoded" not in content_type:
         raise HTTPException(
             status_code=415,
-            detail="Content-Type must be application/x-www-form-urlencoded",
+            detail="Content-Type debe ser application/x-www-form-urlencoded",
         )
     body_bytes = await request.body()
     if not body_bytes.strip():
-        raise HTTPException(status_code=422, detail="Request body is empty")
+        raise HTTPException(status_code=422, detail="El cuerpo de la petición está vacío")
     fields = _parse_urlencoded_body(body_bytes)
     msg, session_id = _validate_ask_bot_fields(
         fields.get("msg"),
         fields.get("session_id"),
     )
-    return AskBotResponse(msg=msg, session_id=session_id, placeholder=True)
+    chain = _ensure_chain()
+    if chain is None:
+        return AskBotResponse(
+            msg=(
+                "OPENAI_API_KEY no está configurada. "
+                "Define la variable en Vercel o en el archivo .env local."
+            ),
+            session_id=session_id,
+        )
+
+    def _invoke() -> Any:
+        return chain.invoke(
+            {"input": msg},
+            config={"configurable": {"session_id": session_id}},
+        )
+
+    try:
+        response = await asyncio.to_thread(_invoke)
+        bot_msg = response.content if hasattr(response, "content") else str(response)
+        return AskBotResponse(msg=bot_msg, session_id=session_id)
+    except Exception as e:  # noqa: BLE001
+        return AskBotResponse(msg=f"Error: {e}", session_id=session_id)

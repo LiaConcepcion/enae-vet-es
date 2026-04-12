@@ -131,12 +131,12 @@ When you change business rules or scheduling logic in `docs/`, update this READM
 
 ---
 
-## API (Chatbot v4)
+## API (FastAPI — mismo comportamiento que `chatbot_v1.py`)
 
-The **Chatbot v4** placeholder API is defined by `main.py`:
+La API en `main.py` expone el mismo asistente (prompt del sistema en español, reglas de la clínica, memoria por `session_id` vía LangChain). Lee **`OPENAI_API_KEY`** del entorno (Vercel o `.env` local).
 
-- **GET /**: returns placeholder HTML for future UI.
-- **POST /ask_bot**: accepts `application/x-www-form-urlencoded` body (`msg`, `session_id`) and returns a JSON stub until LangChain is integrated.
+- **GET /**: interfaz de chat en español (jQuery → `POST /ask_bot`).
+- **POST /ask_bot**: cuerpo `application/x-www-form-urlencoded` con **`msg`** y **`session_id`**. Respuesta JSON: `{"msg": "...", "session_id": "..."}`.
 
 ### Run the API
 
@@ -166,11 +166,13 @@ curl -X POST http://127.0.0.1:8000/ask_bot \
   -d "msg=hello&session_id=s1"
 ```
 
-Expected response:
+Example response (texto real depende del modelo y del historial):
 
 ```json
-{"msg": "hello", "session_id": "s1", "placeholder": true}
+{"msg": "…", "session_id": "s1"}
 ```
+
+Si falta `OPENAI_API_KEY`, `msg` indica que debes configurarla.
 
 ---
 
