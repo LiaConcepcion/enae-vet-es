@@ -114,6 +114,7 @@ Documentation in `docs/` is the single source of truth for business rules, sched
 | **`docs/pre-operative-considerations.md`** | Clinic profile (preventive care, sterilisation, vaccinations, no routine consultations or emergencies), pre-surgery instructions (fasting, transport, consent, pick-up times), and post-op care. Language: Spanish. | Understanding clinic scope, pre-op and post-op instructions, and client-facing messaging (e.g. RAG or confirmation text). |
 | **Business rules / scheduling** | When present in `docs/` (e.g. `business-rules.md`), quota rules, service times, dog limit, drop-off windows, and communication protocol. | Implementing or verifying booking logic, capacity checks, and messaging rules. |
 | **`docs/jira/`** | Groomed Jira exports: enriched ticket specs and before/after examples (e.g. `VETES-14-enriched.md`). | Tracing backlog decisions and onboarding to the **enrich** workflow. |
+| **[`docs/intents-catalog.md`](docs/intents-catalog.md)** | Catálogo de 20 intenciones del chatbot (saludo, agenda, disponibilidad, preoperatorio, ayuno, horarios, especies, derivaciones, etc.) con ejemplos en español. | Diseño de NLU, pruebas conversacionales y alineación de prompts. |
 
 If you add new docs (e.g. `business-rules.md`, `considerations.md`), add a row here and keep the README consistent with them.
 
