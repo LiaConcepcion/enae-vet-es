@@ -160,7 +160,7 @@ async def ask_bot(request: Request) -> AskBotResponse:
         fields.get("session_id"),
     )
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         return AskBotResponse(
             msg=(
