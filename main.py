@@ -5,18 +5,13 @@ Reads ``OPENAI_API_KEY`` from the environment (Vercel env or local ``.env`` via 
 
 from __future__ import annotations
 
-import asyncio
 import os
 import threading
-from typing import Any
 from urllib.parse import parse_qs
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -99,42 +94,7 @@ app = FastAPI(
 )
 
 _session_lock = threading.Lock()
-_session_histories: dict[str, InMemoryChatMessageHistory] = {}
-_chain_with_history: RunnableWithMessageHistory | None = None
-
-
-def _get_session_history(session_id: str) -> InMemoryChatMessageHistory:
-    with _session_lock:
-        if session_id not in _session_histories:
-            _session_histories[session_id] = InMemoryChatMessageHistory()
-        return _session_histories[session_id]
-
-
-def _build_chain_with_history() -> RunnableWithMessageHistory | None:
-    if not os.environ.get("OPENAI_API_KEY"):
-        return None
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", SYSTEM_PROMPT_ES),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-    base = prompt | llm
-    return RunnableWithMessageHistory(
-        base,
-        _get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-    )
-
-
-def _ensure_chain() -> RunnableWithMessageHistory | None:
-    global _chain_with_history
-    if _chain_with_history is None:
-        _chain_with_history = _build_chain_with_history()
-    return _chain_with_history
+_session_histories: dict[str, list[dict]] = {}
 
 
 class AskBotResponse(BaseModel):
@@ -199,8 +159,9 @@ async def ask_bot(request: Request) -> AskBotResponse:
         fields.get("msg"),
         fields.get("session_id"),
     )
-    chain = _ensure_chain()
-    if chain is None:
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
         return AskBotResponse(
             msg=(
                 "OPENAI_API_KEY no está configurada. "
@@ -209,15 +170,27 @@ async def ask_bot(request: Request) -> AskBotResponse:
             session_id=session_id,
         )
 
-    def _invoke() -> Any:
-        return chain.invoke(
-            {"input": msg},
-            config={"configurable": {"session_id": session_id}},
-        )
+    with _session_lock:
+        if session_id not in _session_histories:
+            _session_histories[session_id] = []
+        history = list(_session_histories[session_id])
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT_ES}] + history + [{"role": "user", "content": msg}]
 
     try:
-        response = await asyncio.to_thread(_invoke)
-        bot_msg = response.content if hasattr(response, "content") else str(response)
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "gpt-4o-mini", "temperature": 0.3, "messages": messages},
+            )
+            resp.raise_for_status()
+            bot_msg = resp.json()["choices"][0]["message"]["content"]
+
+        with _session_lock:
+            _session_histories[session_id].append({"role": "user", "content": msg})
+            _session_histories[session_id].append({"role": "assistant", "content": bot_msg})
+
         return AskBotResponse(msg=bot_msg, session_id=session_id)
     except Exception as e:  # noqa: BLE001
         return AskBotResponse(msg=f"Error: {e}", session_id=session_id)
